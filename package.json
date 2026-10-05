@@ -1,0 +1,56 @@
+{
+  "name": "@clinia/context-engine-js",
+  "version": "0.8.0",
+  "description": "TypeScript client for the Clinia Context Engine",
+  "keywords": [
+    "clinia",
+    "context-engine",
+    "healthcare",
+    "fhir",
+    "openapi",
+    "api-client"
+  ],
+  "homepage": "https://docs.clinia.com/docs/introduction",
+  "license": "Apache-2.0",
+  "author": "Clinia Health Inc.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "@clinia:registry": "https://registry.npmjs.org/",
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup && tsc6 -p tsconfig.build.json",
+    "typecheck": "tsc6 --noEmit",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "oauth4webapi": "^3.8.6",
+    "openapi-fetch": "^0.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.2",
+    "tsup": "^8.5.1",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^4.1.5"
+  },
+  "packageManager": "pnpm@10.30.1",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

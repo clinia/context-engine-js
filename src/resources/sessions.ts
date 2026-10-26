@@ -1,7 +1,8 @@
 // This file is auto-generated. Do not edit manually.
+// Generated from the Context Engine OpenAPI spec.
 
 import type { HttpClient } from "../http-client";
-import type { AppendMessagesBody, IngestSessionBody } from "../generated/types";
+import type { AppendMessagesBody } from "../generated/types";
 
 export class SessionsResource {
   readonly #http: HttpClient;
@@ -25,6 +26,9 @@ export class SessionsResource {
     });
   }
 
+  /**
+   * @deprecated This endpoint will be removed in a future release.
+   */
   createSession(patientId: string) {
     return this.#http.POST("/v1/patients/{patientId}/sessions", {
       params: { path: { patientId } },
@@ -37,12 +41,18 @@ export class SessionsResource {
     });
   }
 
+  /**
+   * @deprecated This endpoint will be removed in a future release.
+   */
   upsertSession(patientId: string, sessionId: string) {
     return this.#http.PUT("/v1/patients/{patientId}/sessions/{sessionId}", {
       params: { path: { patientId, sessionId } },
     });
   }
 
+  /**
+   * @deprecated This endpoint will be removed in a future release.
+   */
   appendMessages(patientId: string, sessionId: string, body: AppendMessagesBody) {
     return this.#http.POST("/v1/patients/{patientId}/sessions/{sessionId}/messages", {
       params: { path: { patientId, sessionId } },
@@ -50,16 +60,12 @@ export class SessionsResource {
     });
   }
 
+  /**
+   * @deprecated This endpoint will be removed in a future release.
+   */
   generateMemories(patientId: string, sessionId: string) {
     return this.#http.POST("/v1/patients/{patientId}/sessions/{sessionId}/memories", {
       params: { path: { patientId, sessionId } },
-    });
-  }
-
-  ingestSession(patientId: string, body: IngestSessionBody) {
-    return this.#http.POST("/v1/patients/{patientId}/sessions/ingest", {
-      params: { path: { patientId } },
-      body,
     });
   }
 }

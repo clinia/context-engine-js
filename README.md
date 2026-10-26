@@ -1,4 +1,4 @@
-# @clinia/context-engine-js
+# Context Engine TypeScript Client
 
 TypeScript client for the Clinia Context Engine API. A thin, typed wrapper over
 [`openapi-fetch`](https://openapi-ts.dev/openapi-fetch/) — request/response
@@ -13,14 +13,8 @@ npm install @clinia/context-engine-js
 ```
 
 Published on [npm](https://www.npmjs.com/package/@clinia/context-engine-js). No
-registry configuration or authentication is needed.
-
-While the engine is in release-candidate phase, the newest build is under the
-`rc` dist-tag:
-
-```sh
-npm install @clinia/context-engine-js@rc
-```
+registry configuration or authentication is needed. Only stable releases are
+published here.
 
 **This package is ESM-only** (`"type": "module"`). `require()` of it throws
 `ERR_REQUIRE_ESM`; use `import`, or a dynamic `await import()` from CommonJS.
@@ -73,6 +67,9 @@ await client.patients.getPatient("abc");
 await client.graph.listNodes("abc", "fact", { query: { perPage: 50 } });
 await client.ingest.ingestCdaR2("abc", cdaXml);
 await client.ingest.ingestCdaR2Multipart("abc", { documents: [firstCda, secondCda] });
+await client.ingest.ingestSessions("abc", {
+  sessions: [{ messages: [{ role: "user", content: "Hi" }] }],
+});
 ```
 
 Responses are `{ data, error }` — nothing throws on a non-2xx.
@@ -159,12 +156,13 @@ pnpm typecheck
 pnpm test
 ```
 
-`src/generated/` is generated from the Context Engine's OpenAPI contract on
-each release; do not edit it by hand.
+`src/generated/` and `src/resources/` are generated from the Context Engine OpenAPI spec on each release. Don't edit them by hand.
+
+The [GitHub repository](https://github.com/clinia/context-engine-js) mirrors each release, so it can't merge pull requests. Report bugs in its [issues](https://github.com/clinia/context-engine-js/issues).
 
 ## Changelog
 
-Release notes are at <https://docs.clinia.com/changelog>.
+See the [Context Engine changelog](https://docs.clinia.com/changelog).
 
 ## License
 

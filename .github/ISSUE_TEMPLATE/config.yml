@@ -1,0 +1,9 @@
+blank_issues_enabled: true
+contact_links:
+  # `url` can't be a `mailto:`, so this points at the file naming the address.
+  - name: Workspace, credential, ingest, or API problem
+    url: https://github.com/clinia/context-engine-js/blob/main/CONTRIBUTING.md#where-to-take-things
+    about: Failed ingests, 401s, missing patients, or wrong results happen on the service side and can't be fixed from this repository. Email support@clinia.com.
+  - name: Security vulnerability
+    url: https://github.com/clinia/context-engine-js/blob/main/SECURITY.md
+    about: Email security@clinia.com instead of filing publicly. See SECURITY.md for what is in scope.

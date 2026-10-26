@@ -1,0 +1,72 @@
+name: Bug report
+description: Something in the JavaScript client behaves incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        - **Is it the client, or the engine?** The client sends requests and returns what the API answers. Failed ingests, 401s, missing patients, and wrong results are almost always the workspace or the API, and support can diagnose those where we can't.
+        - **Is it a security issue?** If so, close this and email security@clinia.com instead. See `SECURITY.md`.
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Before submitting
+      options:
+        - label: This is a problem with the client itself, not a workspace, credential, ingest, or API error
+          required: true
+        - label: This report contains no patient data, protected health information, credentials, tokens, or internal hostnames, including in logs
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Client version
+      description: The `@clinia/context-engine-js` version you're using, from your lockfile or `npm ls @clinia/context-engine-js`.
+      placeholder: 0.8.0
+    validations:
+      required: true
+
+  - type: input
+    id: runtime
+    attributes:
+      label: Node and package manager versions
+      description: Output of `node --version`, and your package manager and its version.
+      placeholder: node v22.14.0, pnpm 10.30.1
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: The smallest code that shows the problem. Use synthetic data.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Include the error, and the HTTP status if there is one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Redact tokens and workspace identifiers before pasting.
+      render: shell
+    validations:
+      required: false

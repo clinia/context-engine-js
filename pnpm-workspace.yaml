@@ -1,0 +1,6 @@
+# pnpm 10 does not run a dependency's install scripts unless it is listed
+# here. esbuild (through tsup) fetches its platform binary in one.
+#
+# Generated on each release. Edits here are overwritten on the next one.
+onlyBuiltDependencies:
+  - esbuild

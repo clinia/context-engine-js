@@ -1,9 +1,10 @@
 // This file is auto-generated. Do not edit manually.
+// Generated from the Context Engine OpenAPI spec.
 
 import type { HttpClient } from "../http-client";
 import { toFormData } from "../form-data";
 import type { operations } from "../generated/context-engine";
-import type { IngestFhirBody } from "../generated/types";
+import type { IngestFhirBody, IngestSessionsBody } from "../generated/types";
 
 export class IngestResource {
   readonly #http: HttpClient;
@@ -72,6 +73,18 @@ export class IngestResource {
       params: { path: { patientId } },
       body,
       bodySerializer: (b: unknown) => toFormData(b),
+    });
+  }
+
+  /**
+   * Technical preview.
+   *
+   * @experimental
+   */
+  ingestSessions(patientId: string, body: IngestSessionsBody) {
+    return this.#http.POST("/v1/patients/{patientId}/ingestions/sessions", {
+      params: { path: { patientId } },
+      body,
     });
   }
 }

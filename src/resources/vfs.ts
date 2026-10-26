@@ -1,4 +1,5 @@
 // This file is auto-generated. Do not edit manually.
+// Generated from the Context Engine OpenAPI spec.
 
 import type { HttpClient } from "../http-client";
 

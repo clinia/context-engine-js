@@ -13,7 +13,7 @@ export interface paths {
     };
     /**
      * Get service info
-     * @description Returns the service name and the build identity of the running process. Use it to confirm which build a deployment is serving.
+     * @description Returns the service name, its status, and the build identity of the running process. Use it to confirm which build a deployment is serving, or as an availability probe: it answers `200` when the service is healthy and `503` when it is degraded.
      */
     get: operations["get-service-info"];
     put?: never;
@@ -33,7 +33,7 @@ export interface paths {
     };
     /**
      * List patients
-     * @description Returns a page of the patients currently registered, ordered by registry key. An empty page is returned if none have been registered yet. Graph counts are read per patient from the graph endpoints.
+     * @description Returns a page of the patients currently registered, ordered by patient ID. An empty page is returned if none have been registered yet. Graph counts are read per patient from the graph endpoints.
      */
     get: operations["list-patients"];
     put?: never;
@@ -53,12 +53,12 @@ export interface paths {
     };
     /**
      * Get patient
-     * @description Returns demographic metadata and pipeline stats for a patient identified by its registry key.
+     * @description Returns demographic metadata and pipeline stats for a patient identified by its patient ID.
      */
     get: operations["get-patient"];
     /**
      * Upsert patient
-     * @description Creates the patient entry if it does not yet exist, or returns the existing record unchanged. Fully idempotent — safe to call before or after the first ingest.
+     * @description Creates the patient entry if it does not yet exist, or returns the existing record unchanged. Idempotent.
      *
      *     New ids are limited to `[A-Za-z0-9][A-Za-z0-9.~:-]{0,127}`, but you can keep referring to previous ids as they were defined.
      */
@@ -178,6 +178,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/patients/{patientId}/ingestions/sessions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Ingest sessions
+     * @description Submits one or more conversation transcripts. Each transcript is stored as a session — under the `sessionId` it declares, or a generated one — and the patient's memories are formed from it as ingestion proceeds.
+     *
+     *     The response is a receipt: ingestion continues after it is returned, so poll the ingestion to follow it. `intake` comes back index-aligned with the sessions you sent, each item naming the session its transcript was stored under.
+     *
+     *     Resending a session under the same `sessionId` is safe: messages already stored are recognised and not staged again, and turns added at the end are appended. A transcript without a `sessionId` always opens a new session. A transcript that edits, removes or reorders stored turns is refused. If any transcript is refused, the whole request is rejected and nothing is stored.
+     */
+    post: operations["ingest-sessions"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/patients/{patientId}/ingestions": {
     parameters: {
       query?: never;
@@ -229,7 +253,10 @@ export interface paths {
     put?: never;
     /**
      * Create session
+     * @deprecated
      * @description Opens a new query session scoped to a patient. Sessions track interaction context across multiple MCP tool calls within a single agent run.
+     *
+     *     Deprecated: a session no longer needs opening. Writing under a `sessionId` of your choosing — appending messages, a tool call's `session_id`, or `POST …/ingestions/sessions` — creates it, and the import route generates one when a transcript declares none.
      */
     post: operations["create-session"];
     delete?: never;
@@ -252,9 +279,12 @@ export interface paths {
     get: operations["get-session"];
     /**
      * Upsert a session
+     * @deprecated
      * @description Idempotently opens a session under a caller-provided id: creates it if new, or returns the existing session unchanged. Sessions track interaction context across multiple MCP tool calls within a single agent run.
      *
      *     New ids are limited to `[A-Za-z0-9][A-Za-z0-9.~:-]{0,127}`, but you can keep referring to previous ids as they were defined.
+     *
+     *     Deprecated: a session no longer needs opening. Its first write — appending messages, a tool call's `session_id`, or `POST …/ingestions/sessions` — creates it.
      */
     put: operations["upsert-session"];
     post?: never;
@@ -275,7 +305,12 @@ export interface paths {
     put?: never;
     /**
      * Append session messages
-     * @description Appends user/assistant messages to an open session, in order. The session stays open. Tool-call turns are recorded separately by the MCP layer and are not accepted here.
+     * @deprecated
+     * @description Appends user/assistant messages to a session, in order, creating the session if this is its first write, and queues memory formation over them. The returned `ingestion` is the receipt to poll. Tool-call turns are recorded separately by the MCP layer and are not accepted here.
+     *
+     *     New ids are limited to `[A-Za-z0-9][A-Za-z0-9.~:-]{0,127}`, but you can keep referring to previous ids as they were defined.
+     *
+     *     Deprecated: use `POST …/ingestions/sessions`, which accepts the same messages under the session's id.
      */
     post: operations["append-messages"];
     delete?: never;
@@ -299,29 +334,12 @@ export interface paths {
     put?: never;
     /**
      * Generate session memories
-     * @description Extracts memories from messages appended since the last run and infers memory↔fact relationships. The session stays active and can keep receiving messages. Append-only: it never re-extracts messages already covered by a prior run, so re-running it only adds memories for what's new, but it does not deduplicate against memories from a previous run. Call it intentionally rather than on every turn.
+     * @deprecated
+     * @description Accepts and does nothing: memories form from a session's messages as they arrive, through appending messages or `POST …/ingestions/sessions`, each of which returns the ingestion receipt to poll. `GET …/memories` returns a session's memories as they land.
+     *
+     *     Deprecated: drop the call.
      */
     post: operations["generate-memories"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/v1/patients/{patientId}/sessions/ingest": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Ingest a complete session
-     * @description Replays a complete set of messages as one session: creates the session, appends every message in order, then generates memories from it synchronously, so the response returns only after the patient's memories reflect the conversation. Messages can still be appended to the session. Intended for batch/replay use, not interactive sessions.
-     */
-    post: operations["ingest-session"];
     delete?: never;
     options?: never;
     head?: never;
@@ -672,10 +690,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
-    /** @description Identity of the running service: its name and the build it came from. Reports what this process resolved at startup, which for edge builds is more specific than any released version. */
+    /** @description Identity and status of the running service: its name, whether it can serve requests, and the build it came from. Build identity is what this process resolved at startup, which for edge builds is more specific than any released version. */
     ServiceInfo: {
       /** @description Display name of the service. */
       name: string;
+      /**
+       * @description Whether the service can currently serve requests. `degraded` means requests that read or write data are expected to fail; it is always served with a `503`.
+       * @enum {string}
+       */
+      status: "healthy" | "degraded";
       /** @description Build identity of the running process. */
       version: {
         /** @description Product version of the running build. Injected as `VERSION` at image build time; falls back to the server package version outside a built image. */
@@ -690,7 +713,7 @@ export interface components {
     PatientList: {
       /** @description The requested page of items. */
       data: {
-        /** @description Caller-assigned identifier used in all REST API routes. */
+        /** @description The patient ID, used in every REST route, VFS path and MCP tool. */
         registryKey: string;
         patient: components["schemas"]["PatientDemographics"];
       }[];
@@ -706,14 +729,14 @@ export interface components {
     };
     /** @description Demographic data extracted from the ingested record. Null if no patient resource was found during ingestion. */
     PatientDemographics: {
-      /** @description Internal patient ID extracted from the ingested record (e.g., FHIR Patient.id). Used in VFS paths. */
+      /** @description The patient ID, the identifier the caller chose when creating the patient. */
       id: string;
       /** @description Patient display name extracted from the ingested record. */
       name: string;
     } | null;
     /** @description Demographic metadata and pipeline stats for a single patient. */
     PatientDetail: {
-      /** @description Internal patient ID extracted from the ingested record. Used in VFS paths. */
+      /** @description The patient ID, used in every REST route, VFS path and MCP tool. */
       id: string;
       /** @description Patient display name extracted from the ingested record. */
       name: string;
@@ -947,6 +970,8 @@ export interface components {
       events: number;
       /** @description Prose passages staged. */
       narratives: number;
+      /** @description Conversation messages staged. */
+      messages: number;
     };
     /** @description What the submission held. Absent when it was not recorded. */
     IngestionIntake: {
@@ -974,6 +999,8 @@ export interface components {
         outcome: components["schemas"]["IngestionItemOutcome"];
         reason?: components["schemas"]["IngestionIgnoreReason"];
       }[];
+      /** @description Present on `message` items: the session the conversation was stored under — the `sessionId` it declared, or the one generated for it. Use it to continue the session or read its memories. */
+      sessionId?: string;
     }[];
     /**
      * @description structured: clinical detail was read from it. text_only: kept, but as prose — no structured detail was read. ignored: not used at all.
@@ -996,6 +1023,26 @@ export interface components {
       entry?: unknown[];
     } & {
       [key: string]: unknown;
+    };
+    /** @description One or more sessions to import. */
+    IngestSessionsBody: {
+      /** @description Sessions to import. `intake` comes back index-aligned with this list. */
+      sessions: components["schemas"]["IngestSession"][];
+    };
+    IngestSession: {
+      /** @description Id of the session these messages belong to. Omit it to open a new session under a generated id; send the same id again to continue that session. */
+      sessionId?: string;
+      /** @description The messages, in chronological order. */
+      messages: components["schemas"]["IngestSessionsMessage"][];
+    };
+    IngestSessionsMessage: {
+      /**
+       * @description Author of the message.
+       * @enum {string}
+       */
+      role: "user" | "assistant";
+      /** @description Message text. */
+      content: string;
     };
     /** @description A page of submissions for this patient. */
     IngestionList: {
@@ -1063,19 +1110,6 @@ export interface components {
       /** @description ISO 8601 timestamp when this memory was recorded. */
       createdAt: string;
     };
-    /** @description A complete set of messages to ingest as a single closed session. */
-    IngestSessionBody: {
-      /** @description Every message to replay, in chronological order. */
-      messages: {
-        /**
-         * @description Author of the message.
-         * @enum {string}
-         */
-        role: "user" | "assistant";
-        /** @description Message text. */
-        content: string;
-      }[];
-    };
     /** @description Result of a VFS browse operation. Contains directory children when the path resolves to a directory, or file content metadata when it resolves to a file. */
     BrowseResult: {
       /** @description VFS path of the browsed node, relative to the patient root. */
@@ -1089,6 +1123,8 @@ export interface components {
       children?: {
         /** @description Name of the child node (filename or directory name). */
         name: string;
+        /** @description Human-readable label for the child. Shown beside `name`, never used in a path. */
+        display?: string;
         /**
          * @description Whether this child is a directory or a file.
          * @enum {string}
@@ -1121,7 +1157,7 @@ export interface components {
        * @enum {string}
        */
       type: "extracted_fact";
-      /** @description Unique identifier for this node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`). */
+      /** @description Unique identifier for this node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`). */
       id: string;
       /** @description ISO 8601 timestamp when this node was first created. */
       createdAt: string;
@@ -1138,24 +1174,26 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "condition";
+            /** @description When the fact held: `start` is when it became active, `end` when it ended or was resolved. */
+            effectivePeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
             /**
              * @description Clinical status of the condition. active = currently present; resolved = no longer present; inactive = present but not actively managed.
              * @enum {string}
              */
             status: "active" | "resolved" | "inactive" | "unknown";
-            /** @description ISO date when the condition first started, from Condition.onsetPeriod.start or onsetDateTime. */
-            onsetDate?: string;
+            /** @description ISO date when a clinician stated it held. Shows it held then, not when it started. */
+            assertedAt?: string;
+            /** @description ISO date when its status last changed. */
+            statusChangedAt?: string;
             /** @description Where this fact was extracted from. */
             source: {
               /**
@@ -1184,15 +1222,8 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "medication";
             /**
@@ -1204,6 +1235,31 @@ export interface components {
             dosageInstructions?: string;
             /** @description Route of administration from dosage[].route, e.g. 'Oral', 'IV', 'Topical'. */
             route?: string;
+            /** @description When the fact held: `start` is when it became active, `end` when it ended or was resolved. */
+            effectivePeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
+            /** @description ISO date when the pharmacy prepared the dispense. */
+            preparedAt?: string;
+            /** @description ISO date when the pharmacy handed the drug over, which shows the patient actually received it. */
+            handedOverAt?: string;
+            /** @description ISO date when the drug or procedure was ordered. */
+            orderedAt?: string;
+            /** @description When it is intended to happen, as opposed to when it did: a scheduled encounter or procedure, the intended dosing or therapy span. */
+            plannedPeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
+            /** @description ISO date until which the order may be filled. */
+            orderValidUntil?: string;
+            /** @description ISO date when a clinician stated it held. Shows it held then, not when it started. */
+            assertedAt?: string;
+            routeDecision?: components["schemas"]["MedicationRouteDecision"];
             /** @description Where this fact was extracted from. */
             source: {
               /**
@@ -1232,15 +1288,8 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "allergy";
             /**
@@ -1257,6 +1306,22 @@ export interface components {
             category?: string[];
             /** @description Observed reaction manifestations as display strings from reaction[].manifestation, e.g. ['Swelling', 'Anaphylaxis']. */
             reactions?: string[];
+            /** @description When the fact held: `start` is when it became active, `end` when it ended or was resolved. */
+            effectivePeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
+            /** @description When each recorded reaction to the substance or vaccine started and ended. */
+            reactionPeriods?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            }[];
+            /** @description ISO date of the most recent known reaction to the substance. */
+            lastReactionAt?: string;
             /** @description Where this fact was extracted from. */
             source: {
               /**
@@ -1285,15 +1350,8 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "family_history";
             /** @description Relationship of the relative to the patient from FamilyMemberHistory.relationship.text, e.g. 'Brother', 'Father', 'Maternal grandmother'. */
@@ -1307,7 +1365,15 @@ export interface components {
             conditions: {
               /** @description Condition name for this relative, e.g. 'Multiple sclerosis'. */
               display: string;
+              /** @description When the relative developed the condition: an ISO date, or their age in years. */
+              onset?: string | number;
             }[];
+            /** @description ISO date when the relative was born. */
+            birthDate?: string;
+            /** @description When the relative died: an ISO date, or their age in years at death. */
+            death?: string | number;
+            /** @description The relative's age: in years, or as the source states it. */
+            age?: string | number;
             /** @description Where this fact was extracted from. */
             source: {
               /**
@@ -1336,21 +1402,25 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "social_history";
             /** @description Observation topic from Observation.code.text, e.g. 'Tobacco use and exposure', 'Alcohol use'. */
             category?: string;
             /** @description Current state as a string from Observation.valueString or valueCodeableConcept.text, e.g. 'Smokeless tobacco non-user', 'Current every day smoker'. */
             value?: string;
+            /** @description When the fact held: `start` is when it became active, `end` when it ended or was resolved. */
+            effectivePeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
+            /** @description ISO date when it happened, for something that happened at a point in time. */
+            occurredAt?: string;
+            /** @description ISO date when the result was released, which comes after it was measured. */
+            issuedAt?: string;
             /** @description Where this fact was extracted from. */
             source: {
               /**
@@ -1379,15 +1449,8 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "immunization";
             /**
@@ -1396,7 +1459,20 @@ export interface components {
              */
             status: "completed" | "not-done";
             /** @description ISO date when the vaccine was administered, from Immunization.occurrenceDateTime. */
-            occurrenceDate?: string;
+            occurredAt?: string;
+            /** @description When each recorded reaction to the substance or vaccine started and ended. */
+            reactionPeriods?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            }[];
+            /** @description ISO date when the vaccine lot or device expires. */
+            expiresAt?: string;
+            /** @description ISO date when the vaccine information statement was published. */
+            infoPublishedAt?: string;
+            /** @description ISO date when the vaccine information statement was given to the patient. */
+            infoPresentedAt?: string;
             /** @description Where this fact was extracted from. */
             source: {
               /**
@@ -1425,15 +1501,8 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "device";
             /**
@@ -1441,6 +1510,17 @@ export interface components {
              * @enum {string}
              */
             status: "active" | "inactive" | "entered-in-error" | "unknown";
+            /** @description When the fact held: `start` is when it became active, `end` when it ended or was resolved. */
+            effectivePeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
+            /** @description ISO date when the device was made. */
+            manufacturedAt?: string;
+            /** @description ISO date when the vaccine lot or device expires. */
+            expiresAt?: string;
             /** @description Where this fact was extracted from. */
             source: {
               /**
@@ -1469,19 +1549,14 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "demographic";
             /** @description Patient date of birth in ISO format (YYYY-MM-DD), from Patient.birthDate. */
             birthDate?: string;
+            /** @description When the patient died: an ISO date from Patient.deceasedDateTime, or their age in years at death. */
+            death?: string | number;
             /** @description Administrative sex from Patient.gender, e.g. 'male', 'female'. */
             sex?: string;
             /** @description Flattened address string from Patient.address, e.g. 'Laporte, CO'. Kept as a single string since HG provides it pre-formatted. */
@@ -1514,15 +1589,8 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "insurance";
             /**
@@ -1534,6 +1602,13 @@ export interface components {
             planName?: string;
             /** @description Member identifier from Coverage.identifier[].value. */
             memberId?: string;
+            /** @description When the fact held: `start` is when it became active, `end` when it ended or was resolved. */
+            effectivePeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
             /** @description Where this fact was extracted from. */
             source: {
               /**
@@ -1562,15 +1637,8 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "directive";
             /**
@@ -1580,6 +1648,17 @@ export interface components {
             status: "active" | "void" | "entered-in-error";
             /** @description Directive content extracted from the source document (e.g. living will, POLST). HG delivers these as PDFs rather than structured Consent resources. */
             notes?: string;
+            /** @description When the fact held: `start` is when it became active, `end` when it ended or was resolved. */
+            effectivePeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
+            /** @description ISO date when the patient agreed to or signed it. */
+            signedAt?: string;
+            /** @description ISO date when someone last confirmed it is still valid. */
+            verifiedAt?: string;
             /** @description Where this fact was extracted from. */
             source: {
               /**
@@ -1600,6 +1679,115 @@ export interface components {
             ingestionId: string;
           };
     };
+    /** @description How a medication record's route was decided: `route` is the route it was given, absent when no step placed it, and `evidence` holds every step's decision. Depending on how it was ingested, a medication record carries it. */
+    MedicationRouteDecision: {
+      route?: components["schemas"]["MedicationRoute"];
+      /** @description Every decision the steps made about the route, in the order the steps ran. */
+      evidence: components["schemas"]["MedicationRouteEvidence"][];
+    };
+    /**
+     * @description A route group, or `other` for a route outside every group. Absent from an identity when the route is unknown.
+     * @enum {string}
+     */
+    MedicationRoute:
+      | "oral"
+      | "rectal"
+      | "sublingual"
+      | "buccal"
+      | "nasogastric"
+      | "intramuscular"
+      | "intravenous"
+      | "subcutaneous"
+      | "intradermal"
+      | "intrathecal"
+      | "intraperitoneal"
+      | "intra-articular"
+      | "intraosseous"
+      | "hemodialysis"
+      | "urethral"
+      | "intrauterine"
+      | "intraocular"
+      | "intravesical"
+      | "topical"
+      | "transdermal"
+      | "ophthalmic"
+      | "otic"
+      | "nasal"
+      | "vaginal"
+      | "inhalation"
+      | "nebulization"
+      | "other";
+    /** @description One step's decision about a medication record's route: the route it named and how. `code-match` reads the product's dose form, `phrase-match` the record's texts, `evaluation` and `judgement` ask a model. A model's decision below its confidence threshold, or one the model is not sure of, stays as evidence without giving the route. */
+    MedicationRouteEvidence:
+      | {
+          route: components["schemas"]["MedicationRoute"];
+          /** @enum {string} */
+          method: "code-match";
+          /** @description The RxNorm dose forms that named the route. */
+          evidence: {
+            system: string;
+            code: string;
+            display?: string;
+          }[];
+        }
+      | {
+          route: components["schemas"]["MedicationRoute"];
+          /** @enum {string} */
+          method: "phrase-match";
+          /** @description The texts that named the route, each with the phrase that matched. */
+          evidence: {
+            /** @description The text the phrase was found in, as read from the record. */
+            text: string;
+            /** @description The route phrase that matched, in lower-case words. */
+            phrase: string;
+          }[];
+        }
+      | {
+          route: components["schemas"]["MedicationRoute"];
+          /** @enum {string} */
+          method: "evaluation";
+          /** @description The probability the model gave this route, from 0 to 1. */
+          confidence: number;
+          model: {
+            /** @description Model provider identifier. */
+            provider: string;
+            /** @description Exact provider model identifier. */
+            model: string;
+            /** @description Provider model version when it is distinct from the model identifier. */
+            version?: string;
+          };
+          /** @description The texts and codings the model read. */
+          evidence: (
+            | string
+            | {
+                system: string;
+                code: string;
+                display?: string;
+              }
+          )[];
+        }
+      | {
+          route: components["schemas"]["MedicationRoute"];
+          /** @enum {string} */
+          method: "judgement";
+          /**
+           * @description How sure the model said it was. Only a `certain` judgement gives the route.
+           * @enum {string}
+           */
+          certainty: "certain" | "likely" | "unsure";
+          model: {
+            /** @description Model provider identifier. */
+            provider: string;
+            /** @description Exact provider model identifier. */
+            model: string;
+            /** @description Provider model version when it is distinct from the model identifier. */
+            version?: string;
+          };
+          /** @description The words of the record the model quoted. */
+          evidence: string[];
+          /** @description Why the model named this route. */
+          reasoning: string;
+        };
     /** @description A `fact` node in the patient context graph. */
     FactNode: {
       /**
@@ -1607,7 +1795,7 @@ export interface components {
        * @enum {string}
        */
       type: "fact";
-      /** @description Unique identifier for this node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`). */
+      /** @description Unique identifier for this node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`). */
       id: string;
       /** @description ISO 8601 timestamp when this node was first created. */
       createdAt: string;
@@ -1624,24 +1812,26 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "condition";
+            /** @description When the fact held: `start` is when it became active, `end` when it ended or was resolved. */
+            effectivePeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
             /**
              * @description Clinical status of the condition. active = currently present; resolved = no longer present; inactive = present but not actively managed.
              * @enum {string}
              */
             status: "active" | "resolved" | "inactive" | "unknown";
-            /** @description ISO date when the condition first started, from Condition.onsetPeriod.start or onsetDateTime. */
-            onsetDate?: string;
+            /** @description ISO date when a clinician stated it held. Shows it held then, not when it started. */
+            assertedAt?: string;
+            /** @description ISO date when its status last changed. */
+            statusChangedAt?: string;
             /** @description Every extracted fact this fact was projected from. */
             members: {
               /** @description Id of the `extracted_fact` node this member traces to (`ef_...`). */
@@ -1658,15 +1848,8 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "medication";
             /**
@@ -1678,6 +1861,31 @@ export interface components {
             dosageInstructions?: string;
             /** @description Route of administration from dosage[].route, e.g. 'Oral', 'IV', 'Topical'. */
             route?: string;
+            /** @description When the fact held: `start` is when it became active, `end` when it ended or was resolved. */
+            effectivePeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
+            /** @description ISO date when the pharmacy prepared the dispense. */
+            preparedAt?: string;
+            /** @description ISO date when the pharmacy handed the drug over, which shows the patient actually received it. */
+            handedOverAt?: string;
+            /** @description ISO date when the drug or procedure was ordered. */
+            orderedAt?: string;
+            /** @description When it is intended to happen, as opposed to when it did: a scheduled encounter or procedure, the intended dosing or therapy span. */
+            plannedPeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
+            /** @description ISO date until which the order may be filled. */
+            orderValidUntil?: string;
+            /** @description ISO date when a clinician stated it held. Shows it held then, not when it started. */
+            assertedAt?: string;
+            identity?: components["schemas"]["MedicationIdentity"];
             /** @description Every extracted fact this fact was projected from. */
             members: {
               /** @description Id of the `extracted_fact` node this member traces to (`ef_...`). */
@@ -1694,15 +1902,8 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "allergy";
             /**
@@ -1719,6 +1920,22 @@ export interface components {
             category?: string[];
             /** @description Observed reaction manifestations as display strings from reaction[].manifestation, e.g. ['Swelling', 'Anaphylaxis']. */
             reactions?: string[];
+            /** @description When the fact held: `start` is when it became active, `end` when it ended or was resolved. */
+            effectivePeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
+            /** @description When each recorded reaction to the substance or vaccine started and ended. */
+            reactionPeriods?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            }[];
+            /** @description ISO date of the most recent known reaction to the substance. */
+            lastReactionAt?: string;
             /** @description Every extracted fact this fact was projected from. */
             members: {
               /** @description Id of the `extracted_fact` node this member traces to (`ef_...`). */
@@ -1735,15 +1952,8 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "family_history";
             /** @description Relationship of the relative to the patient from FamilyMemberHistory.relationship.text, e.g. 'Brother', 'Father', 'Maternal grandmother'. */
@@ -1757,7 +1967,15 @@ export interface components {
             conditions: {
               /** @description Condition name for this relative, e.g. 'Multiple sclerosis'. */
               display: string;
+              /** @description When the relative developed the condition: an ISO date, or their age in years. */
+              onset?: string | number;
             }[];
+            /** @description ISO date when the relative was born. */
+            birthDate?: string;
+            /** @description When the relative died: an ISO date, or their age in years at death. */
+            death?: string | number;
+            /** @description The relative's age: in years, or as the source states it. */
+            age?: string | number;
             /** @description Every extracted fact this fact was projected from. */
             members: {
               /** @description Id of the `extracted_fact` node this member traces to (`ef_...`). */
@@ -1774,21 +1992,25 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "social_history";
             /** @description Observation topic from Observation.code.text, e.g. 'Tobacco use and exposure', 'Alcohol use'. */
             category?: string;
             /** @description Current state as a string from Observation.valueString or valueCodeableConcept.text, e.g. 'Smokeless tobacco non-user', 'Current every day smoker'. */
             value?: string;
+            /** @description When the fact held: `start` is when it became active, `end` when it ended or was resolved. */
+            effectivePeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
+            /** @description ISO date when it happened, for something that happened at a point in time. */
+            occurredAt?: string;
+            /** @description ISO date when the result was released, which comes after it was measured. */
+            issuedAt?: string;
             /** @description Every extracted fact this fact was projected from. */
             members: {
               /** @description Id of the `extracted_fact` node this member traces to (`ef_...`). */
@@ -1805,15 +2027,8 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "immunization";
             /**
@@ -1822,7 +2037,20 @@ export interface components {
              */
             status: "completed" | "not-done";
             /** @description ISO date when the vaccine was administered, from Immunization.occurrenceDateTime. */
-            occurrenceDate?: string;
+            occurredAt?: string;
+            /** @description When each recorded reaction to the substance or vaccine started and ended. */
+            reactionPeriods?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            }[];
+            /** @description ISO date when the vaccine lot or device expires. */
+            expiresAt?: string;
+            /** @description ISO date when the vaccine information statement was published. */
+            infoPublishedAt?: string;
+            /** @description ISO date when the vaccine information statement was given to the patient. */
+            infoPresentedAt?: string;
             /** @description Every extracted fact this fact was projected from. */
             members: {
               /** @description Id of the `extracted_fact` node this member traces to (`ef_...`). */
@@ -1839,15 +2067,8 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "device";
             /**
@@ -1855,6 +2076,17 @@ export interface components {
              * @enum {string}
              */
             status: "active" | "inactive" | "entered-in-error" | "unknown";
+            /** @description When the fact held: `start` is when it became active, `end` when it ended or was resolved. */
+            effectivePeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
+            /** @description ISO date when the device was made. */
+            manufacturedAt?: string;
+            /** @description ISO date when the vaccine lot or device expires. */
+            expiresAt?: string;
             /** @description Every extracted fact this fact was projected from. */
             members: {
               /** @description Id of the `extracted_fact` node this member traces to (`ef_...`). */
@@ -1871,19 +2103,14 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "demographic";
             /** @description Patient date of birth in ISO format (YYYY-MM-DD), from Patient.birthDate. */
             birthDate?: string;
+            /** @description When the patient died: an ISO date from Patient.deceasedDateTime, or their age in years at death. */
+            death?: string | number;
             /** @description Administrative sex from Patient.gender, e.g. 'male', 'female'. */
             sex?: string;
             /** @description Flattened address string from Patient.address, e.g. 'Laporte, CO'. Kept as a single string since HG provides it pre-formatted. */
@@ -1904,15 +2131,8 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "insurance";
             /**
@@ -1924,6 +2144,13 @@ export interface components {
             planName?: string;
             /** @description Member identifier from Coverage.identifier[].value. */
             memberId?: string;
+            /** @description When the fact held: `start` is when it became active, `end` when it ended or was resolved. */
+            effectivePeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
             /** @description Every extracted fact this fact was projected from. */
             members: {
               /** @description Id of the `extracted_fact` node this member traces to (`ef_...`). */
@@ -1940,15 +2167,8 @@ export interface components {
               code: string;
               display?: string;
             }[];
-            /** @description ISO date when this fact was recorded or last updated in the source system. */
-            date?: string;
-            /** @description Temporal bounds of the fact's validity. */
-            effectivePeriod?: {
-              /** @description ISO date when this fact became active. */
-              start?: string;
-              /** @description ISO date when this fact ended or was resolved. */
-              end?: string;
-            };
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @enum {string} */
             type: "directive";
             /**
@@ -1958,6 +2178,17 @@ export interface components {
             status: "active" | "void" | "entered-in-error";
             /** @description Directive content extracted from the source document (e.g. living will, POLST). HG delivers these as PDFs rather than structured Consent resources. */
             notes?: string;
+            /** @description When the fact held: `start` is when it became active, `end` when it ended or was resolved. */
+            effectivePeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
+            /** @description ISO date when the patient agreed to or signed it. */
+            signedAt?: string;
+            /** @description ISO date when someone last confirmed it is still valid. */
+            verifiedAt?: string;
             /** @description Every extracted fact this fact was projected from. */
             members: {
               /** @description Id of the `extracted_fact` node this member traces to (`ef_...`). */
@@ -1986,6 +2217,22 @@ export interface components {
       /** @description Score this member was ranked with when the field was decided. */
       score: number;
     };
+    /** @description What identifies a medication: its ingredients, its route, and for `other` the product's dose forms. Depending on how it was ingested, a medication is returned as its identity, codes, status and effective period, and leaves its dose, route text and dates on its members. Its `display` then reads as its identity, and it carries none when no identity was found. */
+    MedicationIdentity: {
+      /** @description Each RxNorm ingredient, at its precise grain when it is given as a salt or ester, sorted by code. */
+      ingredients: {
+        system: string;
+        code: string;
+        display?: string;
+      }[];
+      route?: components["schemas"]["MedicationRoute"];
+      /** @description The product's RxNorm dose forms, sorted by code. Only for `other`, and absent when unknown. */
+      doseForms?: {
+        system: string;
+        code: string;
+        display?: string;
+      }[];
+    };
     /** @description An `extracted_narrative` node in the patient context graph. */
     ExtractedNarrativeNode: {
       /**
@@ -1993,7 +2240,7 @@ export interface components {
        * @enum {string}
        */
       type: "extracted_narrative";
-      /** @description Unique identifier for this node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`). */
+      /** @description Unique identifier for this node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`). */
       id: string;
       /** @description ISO 8601 timestamp when this node was first created. */
       createdAt: string;
@@ -2038,7 +2285,7 @@ export interface components {
        * @enum {string}
        */
       type: "narrative_passage";
-      /** @description Unique identifier for this node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`). */
+      /** @description Unique identifier for this node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`). */
       id: string;
       /** @description ISO 8601 timestamp when this node was first created. */
       createdAt: string;
@@ -2065,7 +2312,7 @@ export interface components {
        * @enum {string}
        */
       type: "narrative";
-      /** @description Unique identifier for this node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`). */
+      /** @description Unique identifier for this node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`). */
       id: string;
       /** @description ISO 8601 timestamp when this node was first created. */
       createdAt: string;
@@ -2128,7 +2375,7 @@ export interface components {
        * @enum {string}
        */
       type: "learned_memory";
-      /** @description Unique identifier for this node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`). */
+      /** @description Unique identifier for this node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`). */
       id: string;
       /** @description ISO 8601 timestamp when this node was first created. */
       createdAt: string;
@@ -2154,7 +2401,7 @@ export interface components {
        * @enum {string}
        */
       type: "extracted_clinical_event";
-      /** @description Unique identifier for this node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`). */
+      /** @description Unique identifier for this node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`). */
       id: string;
       /** @description ISO 8601 timestamp when this node was first created. */
       createdAt: string;
@@ -2165,17 +2412,19 @@ export interface components {
         | {
             /** @enum {string} */
             type: "encounter";
+            /** @description ISO 8601 timestamp when this clinical event occurred. */
+            timestamp: string;
             /** @description Temporal bounds of the event, for one that spans time rather than happening at an instant. */
             effectivePeriod?: {
-              /** @description ISO date when the event's span began. */
+              /** @description ISO date when it began. */
               start?: string;
               /** @description ISO date when it ended. */
               end?: string;
             };
             /** @description One-line description for display and timeline. */
             summary: string;
-            /** @description Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model. */
-            ingestionId?: string;
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /**
              * @description Encounter class. Maps from FHIR V3 ActEncounterCode: IMP/ACUTE/NONAC/SS → inpatient, AMB/OBSENC → outpatient, EMER → emergency, VR → virtual, HH/FLD → home.
              * @enum {string}
@@ -2191,8 +2440,15 @@ export interface components {
             location?: string;
             /** @description Where the patient went after discharge. */
             dischargeDisposition?: string;
-            /** @description ISO 8601 timestamp when this clinical event occurred. */
-            timestamp: string;
+            /** @description When it is intended to happen, as opposed to when it did: a scheduled encounter or procedure, the intended dosing or therapy span. */
+            plannedPeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
+            /** @description ISO date when its status last changed. */
+            statusChangedAt?: string;
             /** @description Where this event was extracted from. Events are single-source — not merged across sources. */
             source: {
               /**
@@ -2209,21 +2465,25 @@ export interface components {
               /** @description ISO 8601 timestamp when this record was ingested. */
               ingestedAt: string;
             };
+            /** @description Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model. */
+            ingestionId?: string;
           }
         | {
             /** @enum {string} */
             type: "observation";
+            /** @description ISO 8601 timestamp when this clinical event occurred. */
+            timestamp: string;
             /** @description Temporal bounds of the event, for one that spans time rather than happening at an instant. */
             effectivePeriod?: {
-              /** @description ISO date when the event's span began. */
+              /** @description ISO date when it began. */
               start?: string;
               /** @description ISO date when it ended. */
               end?: string;
             };
             /** @description One-line description for display and timeline. */
             summary: string;
-            /** @description Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model. */
-            ingestionId?: string;
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /**
              * @description Observation sub-domain. Maps from FHIR Observation.category and CDA section LOINC codes: 30954-2 → laboratory/imaging, 8716-3 → vital-signs, Functional Status / Mental Status sections → functional-status.
              * @enum {string}
@@ -2268,8 +2528,10 @@ export interface components {
              * @enum {string}
              */
             status: "final" | "preliminary" | "amended" | "corrected" | "cancelled" | "unknown";
-            /** @description ISO 8601 timestamp when this clinical event occurred. */
-            timestamp: string;
+            /** @description ISO date when it happened, for something that happened at a point in time. */
+            occurredAt?: string;
+            /** @description ISO date when the result was released, which comes after it was measured. */
+            issuedAt?: string;
             /** @description Where this event was extracted from. Events are single-source — not merged across sources. */
             source: {
               /**
@@ -2286,21 +2548,25 @@ export interface components {
               /** @description ISO 8601 timestamp when this record was ingested. */
               ingestedAt: string;
             };
+            /** @description Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model. */
+            ingestionId?: string;
           }
         | {
             /** @enum {string} */
             type: "procedure";
+            /** @description ISO 8601 timestamp when this clinical event occurred. */
+            timestamp: string;
             /** @description Temporal bounds of the event, for one that spans time rather than happening at an instant. */
             effectivePeriod?: {
-              /** @description ISO date when the event's span began. */
+              /** @description ISO date when it began. */
               start?: string;
               /** @description ISO date when it ended. */
               end?: string;
             };
             /** @description One-line description for display and timeline. */
             summary: string;
-            /** @description Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model. */
-            ingestionId?: string;
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @description Procedure codes from CPT, SNOMED-CT, or ICD PCS. */
             codes?: {
               system: string;
@@ -2316,8 +2582,17 @@ export interface components {
              * @enum {string}
              */
             status: "completed" | "not-done" | "aborted" | "in-progress" | "stopped" | "unknown";
-            /** @description ISO 8601 timestamp when this clinical event occurred. */
-            timestamp: string;
+            /** @description ISO date when it happened, for something that happened at a point in time. */
+            occurredAt?: string;
+            /** @description ISO date when the drug or procedure was ordered. */
+            orderedAt?: string;
+            /** @description When it is intended to happen, as opposed to when it did: a scheduled encounter or procedure, the intended dosing or therapy span. */
+            plannedPeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
             /** @description Where this event was extracted from. Events are single-source — not merged across sources. */
             source: {
               /**
@@ -2334,21 +2609,25 @@ export interface components {
               /** @description ISO 8601 timestamp when this record was ingested. */
               ingestedAt: string;
             };
+            /** @description Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model. */
+            ingestionId?: string;
           }
         | {
             /** @enum {string} */
             type: "medication_event";
+            /** @description ISO 8601 timestamp when this clinical event occurred. */
+            timestamp: string;
             /** @description Temporal bounds of the event, for one that spans time rather than happening at an instant. */
             effectivePeriod?: {
-              /** @description ISO date when the event's span began. */
+              /** @description ISO date when it began. */
               start?: string;
               /** @description ISO date when it ended. */
               end?: string;
             };
             /** @description One-line description for display and timeline. */
             summary: string;
-            /** @description Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model. */
-            ingestionId?: string;
+            /** @description ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time. */
+            authoredAt?: string;
             /** @description Medication name as it appears in the source, e.g. 'Lisinopril 10 mg tablet'. */
             medicationDisplay: string;
             /** @description RxNorm or NDC codes for the medication. */
@@ -2379,8 +2658,25 @@ export interface components {
             dose?: string;
             /** @description Route of administration, e.g. 'oral', 'IV'. */
             route?: string;
-            /** @description ISO 8601 timestamp when this clinical event occurred. */
-            timestamp: string;
+            /** @description ISO date when it happened, for something that happened at a point in time. */
+            occurredAt?: string;
+            /** @description ISO date when the pharmacy prepared the dispense. */
+            preparedAt?: string;
+            /** @description ISO date when the pharmacy handed the drug over, which shows the patient actually received it. */
+            handedOverAt?: string;
+            /** @description ISO date when the drug or procedure was ordered. */
+            orderedAt?: string;
+            /** @description When it is intended to happen, as opposed to when it did: a scheduled encounter or procedure, the intended dosing or therapy span. */
+            plannedPeriod?: {
+              /** @description ISO date when it began. */
+              start?: string;
+              /** @description ISO date when it ended. */
+              end?: string;
+            };
+            /** @description ISO date until which the order may be filled. */
+            orderValidUntil?: string;
+            /** @description ISO date when its status last changed. */
+            statusChangedAt?: string;
             /** @description Where this event was extracted from. Events are single-source — not merged across sources. */
             source: {
               /**
@@ -2397,6 +2693,8 @@ export interface components {
               /** @description ISO 8601 timestamp when this record was ingested. */
               ingestedAt: string;
             };
+            /** @description Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model. */
+            ingestionId?: string;
           };
     };
     /** @description A page of nodes of one type from the patient context graph. */
@@ -2426,7 +2724,7 @@ export interface components {
        * @enum {string}
        */
       type: "resolution_decision";
-      /** @description Unique identifier for this edge, as a prefixed edge id (`{type}_{id}`, e.g. `rd_...`). */
+      /** @description Unique identifier for this edge: its type's prefix, `_`, then the underlying id (e.g. `rd_...`). */
       id: string;
       /** @description ISO 8601 timestamp when this edge was first created. */
       createdAt: string;
@@ -2446,7 +2744,7 @@ export interface components {
          * @enum {string}
          */
         resolution: "uncertain" | "probable" | "confirmed";
-        /** @description Id of the stop rule that fired, e.g. 'corroborated-hierarchical-merge'. This is the audit's 'why'. */
+        /** @description Id of the stop rule that fired, e.g. 'deterministic-code-exact'. This is the audit's 'why'. */
         ruleId: string;
         /** @description The full accumulated evidence the rule evaluated, in the order the layers ran. */
         evidence: (
@@ -2500,12 +2798,15 @@ export interface components {
             }
           | {
               /** @enum {string} */
-              layer: "concept-identity";
+              layer: "deterministic-code";
               a: {
-                /** @description The best candidate's base-ingredient concept ids — more than one for a combination product. */
-                conceptIds: string[];
-                /** @description The best candidate's salt/ester-grain concept ids. Empty when the match carries no precise grain. */
-                preciseConceptIds: string[];
+                /** @description The best candidate's members — more than one for a combination product. */
+                members: {
+                  /** @description The base-ingredient concept id. */
+                  conceptId: string;
+                  /** @description The salt/ester-grain concept ids this ingredient is given as. Empty when the match carries none. */
+                  preciseConceptIds: string[];
+                }[];
                 /**
                  * @description The cascade rung that grounded this side.
                  * @enum {string}
@@ -2515,10 +2816,13 @@ export interface components {
                 compositionId: string;
               };
               b: {
-                /** @description The best candidate's base-ingredient concept ids — more than one for a combination product. */
-                conceptIds: string[];
-                /** @description The best candidate's salt/ester-grain concept ids. Empty when the match carries no precise grain. */
-                preciseConceptIds: string[];
+                /** @description The best candidate's members — more than one for a combination product. */
+                members: {
+                  /** @description The base-ingredient concept id. */
+                  conceptId: string;
+                  /** @description The salt/ester-grain concept ids this ingredient is given as. Empty when the match carries none. */
+                  preciseConceptIds: string[];
+                }[];
                 /**
                  * @description The cascade rung that grounded this side.
                  * @enum {string}
@@ -2532,12 +2836,15 @@ export interface components {
             }
           | {
               /** @enum {string} */
-              layer: "concept-identity";
+              layer: "deterministic-code";
               a: {
-                /** @description The best candidate's base-ingredient concept ids — more than one for a combination product. */
-                conceptIds: string[];
-                /** @description The best candidate's salt/ester-grain concept ids. Empty when the match carries no precise grain. */
-                preciseConceptIds: string[];
+                /** @description The best candidate's members — more than one for a combination product. */
+                members: {
+                  /** @description The base-ingredient concept id. */
+                  conceptId: string;
+                  /** @description The salt/ester-grain concept ids this ingredient is given as. Empty when the match carries none. */
+                  preciseConceptIds: string[];
+                }[];
                 /**
                  * @description The cascade rung that grounded this side.
                  * @enum {string}
@@ -2547,10 +2854,13 @@ export interface components {
                 compositionId: string;
               };
               b: {
-                /** @description The best candidate's base-ingredient concept ids — more than one for a combination product. */
-                conceptIds: string[];
-                /** @description The best candidate's salt/ester-grain concept ids. Empty when the match carries no precise grain. */
-                preciseConceptIds: string[];
+                /** @description The best candidate's members — more than one for a combination product. */
+                members: {
+                  /** @description The base-ingredient concept id. */
+                  conceptId: string;
+                  /** @description The salt/ester-grain concept ids this ingredient is given as. Empty when the match carries none. */
+                  preciseConceptIds: string[];
+                }[];
                 /**
                  * @description The cascade rung that grounded this side.
                  * @enum {string}
@@ -2564,12 +2874,15 @@ export interface components {
             }
           | {
               /** @enum {string} */
-              layer: "concept-identity";
+              layer: "deterministic-code";
               a: {
-                /** @description The best candidate's base-ingredient concept ids — more than one for a combination product. */
-                conceptIds: string[];
-                /** @description The best candidate's salt/ester-grain concept ids. Empty when the match carries no precise grain. */
-                preciseConceptIds: string[];
+                /** @description The best candidate's members — more than one for a combination product. */
+                members: {
+                  /** @description The base-ingredient concept id. */
+                  conceptId: string;
+                  /** @description The salt/ester-grain concept ids this ingredient is given as. Empty when the match carries none. */
+                  preciseConceptIds: string[];
+                }[];
                 /**
                  * @description The cascade rung that grounded this side.
                  * @enum {string}
@@ -2579,10 +2892,13 @@ export interface components {
                 compositionId: string;
               };
               b: {
-                /** @description The best candidate's base-ingredient concept ids — more than one for a combination product. */
-                conceptIds: string[];
-                /** @description The best candidate's salt/ester-grain concept ids. Empty when the match carries no precise grain. */
-                preciseConceptIds: string[];
+                /** @description The best candidate's members — more than one for a combination product. */
+                members: {
+                  /** @description The base-ingredient concept id. */
+                  conceptId: string;
+                  /** @description The salt/ester-grain concept ids this ingredient is given as. Empty when the match carries none. */
+                  preciseConceptIds: string[];
+                }[];
                 /**
                  * @description The cascade rung that grounded this side.
                  * @enum {string}
@@ -2593,6 +2909,30 @@ export interface components {
               };
               /** @enum {string} */
               kind: "concept-identity-mismatch";
+            }
+          | {
+              /** @enum {string} */
+              layer: "identity";
+              a: components["schemas"]["MedicationIdentity"] & unknown;
+              b: components["schemas"]["MedicationIdentity"] & unknown;
+              /** @enum {string} */
+              kind: "medication-identity-match";
+            }
+          | {
+              /** @enum {string} */
+              layer: "identity";
+              a: components["schemas"]["MedicationIdentity"] & unknown;
+              b: components["schemas"]["MedicationIdentity"] & unknown;
+              /** @enum {string} */
+              kind: "medication-identity-mismatch";
+            }
+          | {
+              /** @enum {string} */
+              layer: "identity";
+              a?: components["schemas"]["MedicationIdentity"] & unknown;
+              b?: components["schemas"]["MedicationIdentity"] & unknown;
+              /** @enum {string} */
+              kind: "medication-identity-incomplete";
             }
           | {
               /** @enum {string} */
@@ -2725,7 +3065,7 @@ export interface components {
     };
     /** @description The node this edge originates from. */
     NodeRef: {
-      /** @description Id of the referenced node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`). */
+      /** @description Id of the referenced node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`). */
       id: string;
       /**
        * @description Node type of the referenced node.
@@ -2747,7 +3087,7 @@ export interface components {
        * @enum {string}
        */
       type: "resolves_to";
-      /** @description Unique identifier for this edge, as a prefixed edge id (`{type}_{id}`, e.g. `rd_...`). */
+      /** @description Unique identifier for this edge: its type's prefix, `_`, then the underlying id (e.g. `rd_...`). */
       id: string;
       /** @description ISO 8601 timestamp when this edge was first created. */
       createdAt: string;
@@ -2765,7 +3105,7 @@ export interface components {
        * @enum {string}
        */
       type: "chunked_into";
-      /** @description Unique identifier for this edge, as a prefixed edge id (`{type}_{id}`, e.g. `rd_...`). */
+      /** @description Unique identifier for this edge: its type's prefix, `_`, then the underlying id (e.g. `rd_...`). */
       id: string;
       /** @description ISO 8601 timestamp when this edge was first created. */
       createdAt: string;
@@ -2783,7 +3123,7 @@ export interface components {
        * @enum {string}
        */
       type: "relationship";
-      /** @description Unique identifier for this edge, as a prefixed edge id (`{type}_{id}`, e.g. `rd_...`). */
+      /** @description Unique identifier for this edge: its type's prefix, `_`, then the underlying id (e.g. `rd_...`). */
       id: string;
       /** @description ISO 8601 timestamp when this edge was first created. */
       createdAt: string;
@@ -2994,8 +3334,17 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Service name and build identity */
+      /** @description Service is healthy */
       200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ServiceInfo"];
+        };
+      };
+      /** @description Service is degraded */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -3051,7 +3400,7 @@ export interface operations {
           "application/json": components["schemas"]["PatientDetail"];
         };
       };
-      /** @description Patient not found or no data ingested */
+      /** @description Patient not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -3186,7 +3535,7 @@ export interface operations {
           "text/plain": string;
         };
       };
-      /** @description Patient not found or no data ingested */
+      /** @description Patient not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -3365,6 +3714,51 @@ export interface operations {
       };
     };
   };
+  "ingest-sessions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description ID of the patient */
+        patientId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["IngestSessionsBody"];
+      };
+    };
+    responses: {
+      /** @description Submission accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Ingestion"];
+        };
+      };
+      /** @description A transcript is invalid, names a session id that cannot be used, or does not continue the stored conversation of the session it names */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Patient not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
   "list-ingestions": {
     parameters: {
       query?: {
@@ -3454,7 +3848,7 @@ export interface operations {
           "application/json": components["schemas"]["Session"];
         };
       };
-      /** @description Patient not found or no data ingested */
+      /** @description Patient not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -3540,7 +3934,7 @@ export interface operations {
           "application/json": components["schemas"]["ApiError"];
         };
       };
-      /** @description Patient not found or no data ingested */
+      /** @description Patient not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -3580,10 +3974,20 @@ export interface operations {
             ok: boolean;
             /** @description Number of messages appended. */
             messageCount: number;
+            ingestion: components["schemas"]["Ingestion"] & unknown;
           };
         };
       };
-      /** @description Patient or session not found */
+      /** @description Session id is not usable for a new session, or the session's stored conversation changed concurrently. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Patient not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -3651,62 +4055,19 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Memories generated */
-      200: {
+      /** @description Accepted; memory formation is already queued */
+      202: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           "application/json": {
-            /** @description Always `true` when generation succeeded. */
+            /** @description Always `true`. */
             ok: boolean;
           };
         };
       };
       /** @description Patient or session not found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ApiError"];
-        };
-      };
-    };
-  };
-  "ingest-session": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description ID of the patient */
-        patientId: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["IngestSessionBody"];
-      };
-    };
-    responses: {
-      /** @description Session ingested and closed */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": {
-            /** @description Always `true` when the session was ingested successfully. */
-            ok: boolean;
-            /** @description ID of the session that was created and closed. */
-            sessionId: string;
-            /** @description Number of messages appended to the session. */
-            messageCount: number;
-          };
-        };
-      };
-      /** @description Patient not found or no data ingested */
       404: {
         headers: {
           [name: string]: unknown;
@@ -3741,7 +4102,7 @@ export interface operations {
           "application/json": components["schemas"]["BrowseResult"];
         };
       };
-      /** @description Patient not found or no data ingested */
+      /** @description Patient not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -3780,7 +4141,7 @@ export interface operations {
           "application/json": components["schemas"]["ReadResponse"];
         };
       };
-      /** @description Patient not found or no data ingested */
+      /** @description Patient not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -3807,7 +4168,7 @@ export interface operations {
           | "narrative"
           | "learned_memory"
           | "extracted_clinical_event";
-        /** @description Id of the node to retrieve. */
+        /** @description A node id: its type's prefix, `_`, then the underlying id. Supported prefixes: `ef` (extracted_fact), `fct` (fact), `en` (extracted_narrative), `np` (narrative_passage), `nar` (narrative), `lm` (learned_memory), `ece` (extracted_clinical_event). */
         nodeId: string;
       };
       cookie?: never;
@@ -3823,7 +4184,7 @@ export interface operations {
           "application/json": components["schemas"]["Node"];
         };
       };
-      /** @description `nodeId` is not a node of the given `type`. */
+      /** @description `nodeId` is malformed, or not a node of the given `type`. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -3898,7 +4259,7 @@ export interface operations {
         patientId: string;
         /** @description Type of edge to operate on. */
         type: "resolution_decision" | "resolves_to" | "chunked_into" | "relationship";
-        /** @description Id of the edge to retrieve. */
+        /** @description An edge id: its type's prefix, `_`, then the underlying id. Supported prefixes: `rd` (resolution_decision), `rslv` (resolves_to), `ci` (chunked_into), `rel` (relationship). */
         edgeId: string;
       };
       cookie?: never;
@@ -3914,7 +4275,7 @@ export interface operations {
           "application/json": components["schemas"]["Edge"];
         };
       };
-      /** @description `edgeId` is not an edge of the given `type`. */
+      /** @description `edgeId` is malformed, or not an edge of the given `type`. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -3941,7 +4302,7 @@ export interface operations {
         page?: number | null;
         /** @description Number of edges per page. Defaults to 100; maximum is 1000. */
         perPage?: number;
-        /** @description Restrict results to edges touching the given node id(s) (same `{type}_{id}` format). One id returns every edge touching that node, in either direction. Two ids (repeat the param, e.g. `?touching=a&touching=b`) return only the edge(s) connecting exactly that pair. */
+        /** @description Restrict results to edges touching the given node id(s). One id returns every edge touching that node, in either direction. Two ids (repeat the param, e.g. `?touching=a&touching=b`) return only the edge(s) connecting exactly that pair. */
         touching?: string | string[];
       };
       header?: never;
@@ -3964,7 +4325,7 @@ export interface operations {
           "application/json": components["schemas"]["EdgeList"];
         };
       };
-      /** @description The edge type cannot touch the node `touching` names, or cannot connect the pair it names. */
+      /** @description A `touching` id is malformed, or the edge type cannot touch the node it names or connect the pair it names. */
       400: {
         headers: {
           [name: string]: unknown;

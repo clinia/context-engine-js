@@ -1,6 +1,6 @@
 {
   "name": "@clinia/context-engine-js",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "TypeScript client for the Clinia Context Engine",
   "keywords": [
     "clinia",
@@ -50,7 +50,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "tsup": "^8.5.1",
+    "tsup": "^9.0.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vitest": "^5.0.0"
   },

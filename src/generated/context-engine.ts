@@ -951,12 +951,7 @@ export interface components {
      * @enum {string}
      */
     IngestionSource:
-      | "fhir/r4"
-      | "fhir/r5"
-      | "cda/r2"
-      | "session/v1"
-      | "batch/legacy"
-      | "document/legacy";
+      "fhir/r4" | "fhir/r5" | "cda/r2" | "session/v1" | "batch/legacy" | "document/legacy";
     /**
      * @description Where this submission stands, across all its work.
      * @enum {string}
@@ -1259,7 +1254,8 @@ export interface components {
             orderValidUntil?: string;
             /** @description ISO date when a clinician stated it held. Shows it held then, not when it started. */
             assertedAt?: string;
-            routeDecision?: components["schemas"]["MedicationRouteDecision"];
+            identity?: components["schemas"]["MedicationIdentity"];
+            identityEvidence?: components["schemas"]["MedicationIdentityEvidence"];
             /** @description Where this fact was extracted from. */
             source: {
               /**
@@ -1679,11 +1675,21 @@ export interface components {
             ingestionId: string;
           };
     };
-    /** @description How a medication record's route was decided: `route` is the route it was given, absent when no step placed it, and `evidence` holds every step's decision. Depending on how it was ingested, a medication record carries it. */
-    MedicationRouteDecision: {
+    /** @description What identifies a medication: its ingredients, its route, and for `other` the product's dose forms. Depending on how it was ingested, a medication record carries its own, and a fact the one its members share. Such a fact is returned as its identity, codes, status and effective period, and leaves its dose, route text and dates on its members. Its `display` then reads as its identity, and it carries none when no identity was found. */
+    MedicationIdentity: {
+      /** @description Each RxNorm ingredient, at its precise grain when it is given as a salt or ester, sorted by code. */
+      ingredients: {
+        system: string;
+        code: string;
+        display?: string;
+      }[];
       route?: components["schemas"]["MedicationRoute"];
-      /** @description Every decision the steps made about the route, in the order the steps ran. */
-      evidence: components["schemas"]["MedicationRouteEvidence"][];
+      /** @description The product's RxNorm dose forms, sorted by code. Only for `other`, and absent when unknown. */
+      doseForms?: {
+        system: string;
+        code: string;
+        display?: string;
+      }[];
     };
     /**
      * @description A route group, or `other` for a route outside every group. Absent from an identity when the route is unknown.
@@ -1717,6 +1723,119 @@ export interface components {
       | "inhalation"
       | "nebulization"
       | "other";
+    /** @description How each part of a medication record's identity was decided. `ingredients` and `doseForms` are absent when no lookup was stored for them. Depending on how it was ingested, a medication record carries it. */
+    MedicationIdentityEvidence: {
+      ingredients?: components["schemas"]["MedicationConceptEvidence"];
+      doseForms?: components["schemas"]["MedicationConceptEvidence"];
+      /** @description Every step's decision about the route, in the order the steps ran. */
+      route: components["schemas"]["MedicationRouteEvidence"][];
+    };
+    /** @description How the vocabulary grounded a medication record's ingredients or its dose form: every candidate it found, or why it found none. */
+    MedicationConceptEvidence:
+      | {
+          /** @enum {string} */
+          status: "grounded";
+          /** @description Every candidate found, best first. The first one gives the identity. */
+          candidates: {
+            /**
+             * @description The lookup step: `code`, `crosswalk`, `exact-name` or `normalized-name`, in the order they run.
+             * @enum {string}
+             */
+            method: "code" | "crosswalk" | "exact-name" | "normalized-name";
+            /** @description How closely the candidate matched, from 0 to 1. */
+            score: number;
+            /** @description The concepts it names. A combination product names several. */
+            members: {
+              /** @description The concept, as an RxNorm coding. */
+              concept: {
+                system: string;
+                code: string;
+                display?: string;
+              };
+              /** @description Its precise forms, such as an ingredient's salts or esters. Empty when the vocabulary names none. */
+              precise: {
+                system: string;
+                code: string;
+                display?: string;
+              }[];
+            }[];
+          }[];
+        }
+      | {
+          /** @enum {string} */
+          status: "abstained";
+          /**
+           * @description Why no candidate was found: every step that ran gave up (`cascade-exhausted`), the record carries nothing to look up (`nothing-to-resolve`), or the vocabulary is not set up for it.
+           * @enum {string}
+           */
+          reason:
+            | "cascade-exhausted"
+            | "nothing-to-resolve"
+            | "unsupported-domain"
+            | "unserved-target-system";
+          /** @description How each step that ran gave up, in the order they ran. Empty unless `reason` is `cascade-exhausted`. */
+          attempts: (
+            | {
+                /**
+                 * @description The lookup step: `code`, `crosswalk`, `exact-name` or `normalized-name`, in the order they run.
+                 * @enum {string}
+                 */
+                method: "code" | "crosswalk" | "exact-name" | "normalized-name";
+                /**
+                 * @description Why the step gave up on these codes: a system it does not recognize, a system it does not serve, a code it does not hold, a code with no RxNorm equivalent, or a concept with no ingredient or dose form.
+                 * @enum {string}
+                 */
+                reason:
+                  | "unrecognized-system"
+                  | "unserved-system"
+                  | "unknown-code"
+                  | "no-crosswalk-equivalent"
+                  | "no-roll-up";
+                /** @description The codes the step looked up, each system as the record spelled it or as its URI. */
+                codes: {
+                  system: string;
+                  code: string;
+                }[];
+              }
+            | {
+                /**
+                 * @description The lookup step: `code`, `crosswalk`, `exact-name` or `normalized-name`, in the order they run.
+                 * @enum {string}
+                 */
+                method: "code" | "crosswalk" | "exact-name" | "normalized-name";
+                /** @enum {string} */
+                reason: "no-name-match";
+                /** @description The names the step looked up. */
+                names: string[];
+              }
+            | {
+                /**
+                 * @description The lookup step: `code`, `crosswalk`, `exact-name` or `normalized-name`, in the order they run.
+                 * @enum {string}
+                 */
+                method: "code" | "crosswalk" | "exact-name" | "normalized-name";
+                /** @enum {string} */
+                reason: "ambiguous-name";
+                /** @description The names the step looked up. */
+                names: string[];
+                /** @description Each set of concepts the close names lead to, best match first. */
+                sets: {
+                  /** @description The concept, as an RxNorm coding. */
+                  concept: {
+                    system: string;
+                    code: string;
+                    display?: string;
+                  };
+                  /** @description Its precise forms, such as an ingredient's salts or esters. Empty when the vocabulary names none. */
+                  precise: {
+                    system: string;
+                    code: string;
+                    display?: string;
+                  }[];
+                }[][];
+              }
+          )[];
+        };
     /** @description One step's decision about a medication record's route: the route it named and how. `code-match` reads the product's dose form, `phrase-match` the record's texts, `evaluation` and `judgement` ask a model. A model's decision below its confidence threshold, or one the model is not sure of, stays as evidence without giving the route. */
     MedicationRouteEvidence:
       | {
@@ -2217,22 +2336,6 @@ export interface components {
       /** @description Score this member was ranked with when the field was decided. */
       score: number;
     };
-    /** @description What identifies a medication: its ingredients, its route, and for `other` the product's dose forms. Depending on how it was ingested, a medication is returned as its identity, codes, status and effective period, and leaves its dose, route text and dates on its members. Its `display` then reads as its identity, and it carries none when no identity was found. */
-    MedicationIdentity: {
-      /** @description Each RxNorm ingredient, at its precise grain when it is given as a salt or ester, sorted by code. */
-      ingredients: {
-        system: string;
-        code: string;
-        display?: string;
-      }[];
-      route?: components["schemas"]["MedicationRoute"];
-      /** @description The product's RxNorm dose forms, sorted by code. Only for `other`, and absent when unknown. */
-      doseForms?: {
-        system: string;
-        code: string;
-        display?: string;
-      }[];
-    };
     /** @description An `extracted_narrative` node in the patient context graph. */
     ExtractedNarrativeNode: {
       /**
@@ -2514,13 +2617,7 @@ export interface components {
              * @enum {string}
              */
             interpretation?:
-              | "critical-high"
-              | "critical-low"
-              | "high"
-              | "low"
-              | "normal"
-              | "absent"
-              | "unknown";
+              "critical-high" | "critical-low" | "high" | "low" | "normal" | "absent" | "unknown";
             /** @description Reference range as a display string, e.g. '3.5–5.5 mmol/L'. */
             referenceRange?: string;
             /**
@@ -4102,7 +4199,7 @@ export interface operations {
           "application/json": components["schemas"]["BrowseResult"];
         };
       };
-      /** @description Patient not found */
+      /** @description Patient or path not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -4141,7 +4238,7 @@ export interface operations {
           "application/json": components["schemas"]["ReadResponse"];
         };
       };
-      /** @description Patient not found */
+      /** @description Patient or path not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -5276,11 +5373,46 @@ export interface operations {
           perPage?: number;
           /** @description Conditions to filter on, ANDed together. Omitted or empty matches every relationship. */
           filter?: {
-            /** @description Restrict to this relationship type. */
-            type?: {
-              /** @description Matches exactly this value. */
-              eq: string;
-            };
+            /** @description Restrict to relationships of this type. */
+            type?:
+              | {
+                  /**
+                   * @description Matches exactly this value.
+                   * @enum {string}
+                   */
+                  eq:
+                    | "prescribed_for"
+                    | "monitors"
+                    | "occurred_during"
+                    | "has_complication"
+                    | "manifestation_of"
+                    | "progression_of"
+                    | "risk_factor_for"
+                    | "commonly_comorbid"
+                    | "same_disease_axis"
+                    | "related_to"
+                    | "corroborates"
+                    | "enriches"
+                    | "conflicts";
+                }
+              | {
+                  /** @description Matches any of these values. At most 500. */
+                  any: (
+                    | "prescribed_for"
+                    | "monitors"
+                    | "occurred_during"
+                    | "has_complication"
+                    | "manifestation_of"
+                    | "progression_of"
+                    | "risk_factor_for"
+                    | "commonly_comorbid"
+                    | "same_disease_axis"
+                    | "related_to"
+                    | "corroborates"
+                    | "enriches"
+                    | "conflicts"
+                  )[];
+                };
             /** @description Restrict to relationships recorded from this source. */
             source?:
               | {

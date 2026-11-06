@@ -2865,22 +2865,6 @@ export interface components {
             }
           | {
               /** @enum {string} */
-              kind: "hierarchical-code-match";
-              /** @enum {string} */
-              layer: "deterministic-code";
-              /** @description The code system the match was made in: its canonical URI when recognized, the source spelling otherwise. */
-              system: string;
-              /** @description Whether the code system was one the vocabulary layer recognizes at decision time. */
-              systemRecognized: boolean;
-              /** @description The code from entity A. */
-              codeA: string;
-              /** @description The code from entity B. */
-              codeB: string;
-              /** @description The ancestor code that links the two entities' codes hierarchically. */
-              ancestorCode: string;
-            }
-          | {
-              /** @enum {string} */
               kind: "code-mismatch";
               /** @enum {string} */
               layer: "deterministic-code";
